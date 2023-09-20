@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Chat</title>
+    <link
+      rel="stylesheet"
+      href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css"
+    />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+      body {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        padding: 5%;
+        margin: 0;
+        background-color: #e9ecef;
+        font-family: Arial, sans-serif;
+      }
+
+      h2 {
+        font-size: 2em;
+        color: #495057;
+        margin-top: 20px;
+        margin-bottom: 20px;
+      }
+      #chatbox {
+        width: 100%;
+        height: 75vh;
+        border: 1px solid #6c757d;
+        overflow: auto;
+        padding: 10px;
+        background-color: #f8f9fa;
+        margin-bottom: 10px;
+        border-radius: 8px;
+      }
+      #settings .form-control {
+        margin-bottom: 13px;
+      }
+      #userInput,
+      #systemMessage {
+        width: 100%;
+        min-height: 200px;
+        margin-bottom: 10px;
+        padding: 8px;
+        border: 1px solid #6c757d;
+        border-radius: 8px;
+      }
+      button {
+        width: 100%;
+        padding: 10px;
+        font-size: 1.2em;
+        background-color: #1b6ec2;
+        color: #ffffff;
+        border-radius: 8px;
+        margin-right: 10px;
+      }
+      .slider {
+        width: 100%;
+        height: 25px;
+      }
+      .slider::-webkit-slider-runnable-track {
+        width: 100%;
+        height: 5px;
+        cursor: pointer;
+        animate: 0.2s;
+        box-shadow: 1px 1px 1px #000000, 0px 0px 1px #0d0d0d;
+        background: #1b6ec2;
+        border-radius: 1.3px;
+        border: 0.2px solid #010101;
+      }
+      .slider::-webkit-slider-thumb {
+        box-shadow: 1px 1px 1px #000000, 0px 0px 1px #0d0d0d;
+        border: 1px solid #000000;
+        height: 11px;
+        width: 11px;
+        border-radius: 50px;
+        background: #ffffff;
+        cursor: pointer;
+        -webkit-appearance: none;
+        margin-top: -3px;
+      }
+      .slider:focus {
+        outline: none;
+      }
+      #chatHistoryList {
+        height: 25vh;
+        overflow: auto;
+        border: 1px solid #6c757d;
+        border-radius: 8px;
+        padding: 10px;
+        margin-bottom: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container-fluid">
+      <div class="row">
+        <!-- Main Chat Section -->
+        <div class="col-12 col-lg-8">
+          <h2>Chat</h2>
+          <div id="chatbox"></div>
+          <textarea
+            id="userInput"
+            class="form-control"
+            placeholder="Enter your message here"
+          ></textarea>
+          <button class="btn btn-primary" onclick="sendMessage()">Send</button>
+          <button class="btn btn-secondary" onclick="startNewChat()">
+            Start New Chat
+          </button>
+        </div>
+
+        <!-- Chat History Sidebar & Settings -->
+        <div class="col-12 col-lg-4">
+          <!-- Chat History Sidebar -->
+          <h2>Chat History</h2>
+          <div id="chatHistoryList"></div>
+
+          <!-- Settings -->
+          <h2>Settings</h2>
+          <div id="settings">
+            <div class="form-group">
+              <label for="temperature">Temperature:</label>
+              <input
+                type="range"
+                id="temperatureSlider"
+                min="0"
+                max="2"
+                step="0.1"
+                value="1"
+                class="slider"
+                oninput="updateTemperatureInput()"
+              />
+              <input
+                type="number"
+                id="temperatureInput"
+                min="0"
+                max="2"
+                step="0.1"
+                value="1"
+                class="form-control"
+                oninput="updateTemperatureSlider()"
+              />
+            </div>
+            <div class="form-group">
+              <label for="maxTokens">Max Tokens:</label>
+              <input
+                type="range"
+                id="maxTokensSlider"
+                min="0"
+                max="32000"
+                step="512"
+                class="slider"
+                oninput="updateMaxTokensInput()"
+              />
+              <input
+                type="number"
+                id="maxTokensInput"
+                min="0"
+                max="32000"
+                class="form-control"
+                oninput="updateMaxTokensSlider()"
+              />
+            </div>
+            <select
+              id="model"
+              class="form-control"
+              onchange="updateMaxTokensRange()"
+            >
+              <option value="gpt-4">gpt-4</option>
+              <option value="gpt-4-0613">gpt-4-0613</option>
+              <option value="gpt-4-32k">gpt-4-32k</option>
+              <option value="gpt-4-32k-0613">gpt-4-32k-0613</option>
+              <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+              <option value="gpt-3.5-turbo-16k">gpt-3.5-turbo-16k</option>
+              <option value="gpt-3.5-turbo-0613">gpt-3.5-turbo-0613</option>
+              <option value="gpt-3.5-turbo-16k-0613">
+                gpt-3.5-turbo-16k-0613
+              </option>
+            </select>
+            <textarea
+              id="systemMessage"
+              class="form-control"
+              placeholder="System message"
+            ></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      function startNewChat() {
+        const chatbox = document.getElementById("chatbox");
+        const chatHistory = localStorage.getItem("chatHistory") || "[]";
+        const parsedChatHistory = JSON.parse(chatHistory);
+
+        const newChat = {
+          timestamp: new Date().toISOString(),
+          content: chatbox.innerHTML,
+        };
+
+        parsedChatHistory.unshift(newChat);
+        localStorage.setItem("chatHistory", JSON.stringify(parsedChatHistory));
+
+        chatbox.innerHTML = "";
+
+        // Inform the server about the new chat
+        socket.emit("new chat", {});
+
+        // Return the index (which will be 0 since we've just unshifted the chat to the start of the array)
+        return 0;
+      }
+
+      var modelMaxTokens = {
+        "gpt-4": 8100,
+        "gpt-4-0613": 8000,
+        "gpt-4-32k": 32000,
+        "gpt-4-32k-0613": 32000,
+        "gpt-3.5-turbo": 4000,
+        "gpt-3.5-turbo-16k": 16000,
+        "gpt-3.5-turbo-0613": 4000,
+        "gpt-3.5-turbo-16k-0613": 16000,
+      };
+
+      function updateMaxTokensRange() {
+        var model = document.getElementById("model").value;
+        document.getElementById("maxTokensSlider").max = modelMaxTokens[model];
+        document.getElementById("maxTokensInput").max = modelMaxTokens[model];
+      }
+
+      function updateMaxTokensInput() {
+        document.getElementById("maxTokensInput").value =
+          document.getElementById("maxTokensSlider").value;
+      }
+
+      function updateMaxTokensSlider() {
+        document.getElementById("maxTokensSlider").value =
+          document.getElementById("maxTokensInput").value;
+      }
+
+      function updateTemperatureInput() {
+        document.getElementById("temperatureInput").value =
+          document.getElementById("temperatureSlider").value;
+      }
+
+      function updateTemperatureSlider() {
+        document.getElementById("temperatureSlider").value =
+          document.getElementById("temperatureInput").value;
+      }
+
+      var socket = io.connect("http://localhost:5000");
+
+      socket.on("message", function (data) {
+        var chatbox = document.getElementById("chatbox");
+        chatbox.innerHTML += `<p><strong>Assistant:</strong> ${data}</p>`;
+        chatbox.scrollTop = chatbox.scrollHeight;
+      });
+
+      var currentChatId = null; // Global variable to maintain current chat ID
+
+      function sendMessage() {
+        if (currentChatId === null) {
+          currentChatId = startNewChat();
+        }
+
+        var message = document.getElementById("userInput").value;
+        var systemMessage = document.getElementById("systemMessage").value;
+        var temperature = document.getElementById("temperatureInput").value;
+        var maxTokens = document.getElementById("maxTokensInput").value;
+
+        if (!maxTokens) {
+          alert("Please provide a value for max tokens.");
+          return;
+        }
+
+        var model = document.getElementById("model").value;
+
+        // Send the message to the server, including the chatId
+        socket.emit("message", {
+          chatId: currentChatId,
+          content: message,
+          systemMessage: systemMessage,
+          temperature: temperature,
+          maxTokens: maxTokens,
+          model: model,
+        });
+
+        document.getElementById("userInput").value = "";
+      }
+      function loadChatHistory() {
+        const chatHistoryList = document.getElementById("chatHistoryList");
+        const chatHistory = JSON.parse(
+          localStorage.getItem("chatHistory") || "[]"
+        );
+
+        chatHistoryList.innerHTML = ""; // clear any existing items
+
+        chatHistory.forEach((item, index) => {
+          const chatItem = document.createElement("div");
+          chatItem.classList.add("chatHistoryItem");
+          chatItem.innerHTML = `Chat from: ${new Date(
+            item.timestamp
+          ).toLocaleString()}`;
+          chatItem.addEventListener("click", () => loadChatFromHistory(index));
+          chatHistoryList.appendChild(chatItem);
+        });
+      }
+
+      function loadChatFromHistory(index) {
+        const chatHistory = JSON.parse(
+          localStorage.getItem("chatHistory") || "[]"
+        );
+        const selectedChat = chatHistory[index];
+        const chatbox = document.getElementById("chatbox");
+        chatbox.innerHTML = selectedChat.content;
+      }
+
+      // Call loadChatHistory when the page loads
+      document.addEventListener("DOMContentLoaded", loadChatHistory);
+    </script>
+  </body>
+</html>
